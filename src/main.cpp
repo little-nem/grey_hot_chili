@@ -2,6 +2,7 @@
 #include <iostream>
 
 #include "optionparser.h"
+#include "interpolation.h"
 
 struct Arg: public option::Arg
 {
@@ -121,6 +122,8 @@ int main(int argc, char* argv[])
 
     std::cout << "Welcome in the project; trying to load " << source_image_name 
               << "and" << target_image_name << std::endl;
+
+    interpolation(source_image_name, target_image_name, N);
 
     return 0;
 }

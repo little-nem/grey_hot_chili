@@ -5,7 +5,7 @@ CFLAGS=-std=c++11 -Wall -O3 -Isrc/lib/ -fopenmp
 LDFLAGS=-lgomp
 
 SRC=$(addprefix	src/,\
-		main.cpp image.cpp pixel.cpp stb_implem.cpp)
+		main.cpp interpolation.cpp image.cpp pixel.cpp stb_implem.cpp)
 
 OBJ=$(patsubst src/%.cpp, build/%.o, $(SRC))
 
