@@ -12,6 +12,65 @@
 #include "interpolation.h"
 #include "power_diagram.h"
 
+void generate_mapping(Image image, voro::container &container, std::vector< std::vector<int> > &pix_to_site, std::vector< std::vector<std::pair<double, double> > > &pix_to_coord, std::vector< std::vector< std::pair<int, int> > > &site_to_pix, int N)
+{
+    std::cout << "Generate a mapping..." << std::endl;
+
+    int width = image.width;
+    int height = image.height;
+
+    pix_to_site = std::vector< std::vector<int> > (width, std::vector<int>(height, -1));
+    pix_to_coord = std::vector< std::vector<std::pair<double, double> > > (width, std::vector< std::pair<double,double> >(height));
+    site_to_pix = std::vector< std::vector< std::pair<int, int> > > (N);
+
+    for(int x = 0; x < image.width; x++) {
+        for(int y = 0; y < image.height; y++) {
+            double rx, ry, rz;
+            int site_id;            
+            if(container.find_voronoi_cell((double)x,double(y),0., rx, ry, rz, site_id)) {
+                pix_to_site[x][y] = site_id;
+                pix_to_coord[x][y] = std::make_pair(rx, ry); 
+                site_to_pix[site_id].push_back(std::make_pair(x,y));
+            } else {
+                std::cout << " ERROR CASE in generate_mapping" << std::endl;
+            }
+        }
+    }
+}
+
+void generate_image_from_container(Image image, voro::container &container, std::string name, int N)
+{
+    Image quantized = image;
+
+    std::vector< std::vector<int> > pix_to_site; 
+    std::vector< std::vector<std::pair<double, double> > > pix_to_coord; 
+    std::vector< std::vector< std::pair<int, int> > > site_to_pix;  
+
+    generate_mapping(image, container, pix_to_site, pix_to_coord, site_to_pix, N);
+
+    std::vector< double > site_weight(N, 0);
+
+    for(int i = 0; i < N; i++) {
+        int site_size = site_to_pix[i].size();
+        for(std::pair<int, int> p : site_to_pix[i]) {
+            site_weight[i] += (image.data[p.first][p.second].gs())/(double)site_size;
+        }
+    }
+
+    for(int x = 0; x < image.width; x++) {
+        for(int y = 0; y < image.height; y++) {
+            int site = pix_to_site[x][y];
+            int x_site = floor(pix_to_coord[x][y].first);
+            int y_site = floor(pix_to_coord[x][y].second);
+
+            quantized.data[x][y] = Pixel(site_weight[site]);//Pixel(image.data[x_site][y_site].gs());
+        }
+    }
+
+    quantized.save_to_file(name);
+}
+
+
 // receives a gray-scaled image, and performs rejection sampling on it,
 // returns a cloud of N points
 void sampling_from_measure(Image image, std::vector< std::pair<double, double> > &sample, int N)    
@@ -43,14 +102,18 @@ void sampling_from_measure(Image image, std::vector< std::pair<double, double> >
         int x = dist_col(rng); 
         int y = dist_row(rng);
         double u = dist_unif(rng);
+
         // the grayscale defines a distribution on the image
         // since 0 < rho(p) <= 1 we have rho(p) <= nb_pixel * density_unif_pixel(p)
         // so we need to check whether u < rho(p)
-        bool already_found = (std::find(sample.begin(), sample.end(), std::make_pair((double)x,(double)y)) != sample.end());
-        if(u <= (1-image.data[x][y].gs())/normalization && !already_found) {
-            // accept the pixel
-            sample.push_back(std::make_pair((double)x,(double)y));
-            sampled++;
+
+        if(u <= (1-image.data[x][y].gs())/normalization) {
+            bool already_found = (std::find(sample.begin(), sample.end(), std::make_pair((double)x,(double)y)) != sample.end());
+            if(!already_found) {
+                // accept the pixel
+                sample.push_back(std::make_pair((double)x,(double)y));
+                sampled++;
+            }
         }
     }
 }
@@ -81,6 +144,7 @@ void lloyd_sampling(Image image, int N)
             sprintf(name, "debug_imgs/lloyd_iter_%d.png", iter); 
 
             evolution.save_to_file(name);
+
             delete[] name;
         }
        
@@ -100,6 +164,15 @@ void lloyd_sampling(Image image, int N)
             c.centroid(centr_x, centr_y, centr_z);
             sample[id] = std::make_pair(x + 0.5*centr_x, y+0.5*centr_y);
         } while (cla.inc());
+
+
+        char* name = new char[100];
+
+        sprintf(name, "debug_imgs/lloyd_mapped_iter_%d.png", iter); 
+           
+        generate_image_from_container(image, container, name, N);
+            
+        delete[] name;
     }
 }
 
@@ -126,20 +199,7 @@ void interpolation(std::string source_image, std::string target_image, int N)
     PowerDiagram pd = PowerDiagram(sites, weights, 128., 128.);
     pd.get_projection();
 
-    for(int i = 0; i < pd.nb_sites; i++) {
-        std::cout << "Site " << i << " : " << std::endl;
-        for(std::pair<double, double> pt : pd.sites_edges[i]) {
-            std::cout << "\t(" << pt.first << ", " << pt.second << "), " << std::endl;
-        }
-    }
-    std::cout << "gnnnu" << std::endl;
-    for(int i = 0; i < pd.nb_sites; i++) {
-        for(std::pair<double, double> pt : pd.sites_edges[i]) {
-            std::cout << pt.first << " " << pt.second << std::endl;
-        }
-    }
-
-    lloyd_sampling(target, 100);
+    lloyd_sampling(target, 500);
     target.save_to_file("sampled.png");
     
     return;
