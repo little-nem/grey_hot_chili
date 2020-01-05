@@ -22,10 +22,10 @@ PowerDiagram::PowerDiagram(std::vector< std::pair<double, double> > s, std::vect
     weights = w;
 
     // to ensure that we will not compute square roots of non-positive numbers
-    lifting_constant = 4 * (*max_element(weights.begin(),weights.end()));
+    lifting_constant = 2 * std::max(*max_element(weights.begin(),weights.end()), - *min_element(weights.begin(),weights.end()));
 
     // create the container
-    container = new voro::container (0., x_range, 0., y_range, 0., sqrt(lifting_constant), 1, 1, 1, false,false,false, nb_sites);
+    container = new voro::container (0., x_range, 0., y_range, 0., sqrt(2*lifting_constant), 1, 1, 1, false,false,false, nb_sites);
 
     // we will add the lifted points to a container
     // remember that the lifting is (x, y) -> (x, y, sqrt(c - w)) 

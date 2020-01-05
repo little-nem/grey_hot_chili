@@ -13,11 +13,11 @@
 #include "interpolation.h"
 #include "power_diagram.h"
 
-#define DEBUG 0
+#define DEBUG 1
 
 void generate_mapping(Image image, voro::container &container, std::vector< std::vector<int> > &pix_to_site, std::vector< std::vector<std::pair<double, double> > > &pix_to_coord, std::vector< std::vector< std::pair<int, int> > > &site_to_pix, std::vector<double> &site_weight, int N)
 {
-    std::cout << "Generate a mapping..." << std::endl;
+    if(DEBUG) std::cout << "Generate a mapping..." << std::endl;
 
     int width = image.width;
     int height = image.height;
@@ -118,16 +118,16 @@ void lloyd_sampling(Image image, std::vector< std::pair<double, double> >&sample
     int height = image.height;
     int width = image.width;
 
-    int max_iter = 3;
+    int max_iter = 10;
 
     sampling_from_measure(image, sample, N);
     
     std::cout << "Performs Lloyd iterations to properly quantize the target image..." << std::endl; 
 
     for(int iter = 0; iter < max_iter; iter++) {
-        int id;
-        double x,y,z,r;         
         Image evolution = image;
+
+        if(iter % 5 == 0) std::cout << "Lloyd iteration " << iter << std::endl;
 
         if(DEBUG) {
             for(int i = 0; i < N; i ++) {
@@ -145,8 +145,7 @@ void lloyd_sampling(Image image, std::vector< std::pair<double, double> >&sample
             }
         }
        
-        voro::container container(0, width, 0, height, -0.5, 0.5, 1, 1, 1, false, false, false, N);
-        
+        voro::container container(0, width, 0, height, -0.5, 0.5, 1, 1, 1, false, false, false, N);        
         for(int i = 0; i < N; i++) {
             container.put(i, sample[i].first, sample[i].second, 0.);
         }
@@ -155,21 +154,30 @@ void lloyd_sampling(Image image, std::vector< std::pair<double, double> >&sample
         voro::c_loop_all cla(container);
         voro::voronoicell c;
 
-        if(cla.start()) do if (container.compute_cell(c,cla)) {
-            cla.pos(id,x,y,z,r);
-            double centr_x, centr_y, centr_z;
-            c.centroid(centr_x, centr_y, centr_z);
-            sample[id] = std::make_pair(x + 0.5*centr_x, y+0.5*centr_y);
-        } while (cla.inc());
+        std::vector< std::vector<int> > pix_to_site; 
+        std::vector< std::vector<std::pair<double, double> > > pix_to_coord; 
+        std::vector< std::vector< std::pair<int, int> > > site_to_pix;  
+        std::vector< double > site_weight;
+
+        generate_mapping(image, container, pix_to_site, pix_to_coord, site_to_pix, site_weight, N);
+        for(int id = 0; id < N; id++) {
+            double centr_x = 0., centr_y = 0.;
+            double negative_weight = 0.;
+
+            for(std::pair<int, int> p : site_to_pix[id]) {
+                double density = image.data[p.first][p.second].gs();
+                negative_weight += 1-density;
+                centr_x += (double)p.first * (1-density);
+                centr_y += (double)p.second * (1-density);
+            }
+            sample[id] = std::make_pair(centr_x/negative_weight, centr_y/negative_weight);
+        }
 
 
         if(DEBUG) {
             char* name = new char[100];
-
             sprintf(name, "debug_imgs/lloyd_mapped_iter_%d.png", iter); 
-           
             generate_image_from_container(image, container, name, N);
-            
             delete[] name;
         }
 
@@ -181,9 +189,6 @@ void lloyd_sampling(Image image, std::vector< std::pair<double, double> >&sample
             generate_mapping(image, container, pix_to_site, pix_to_coord, site_to_pix, masses, N);
         }
     }
-
-
-
 }
 
 double compute_total_mass(Image image)
@@ -199,8 +204,10 @@ double compute_total_mass(Image image)
 
 void interpolation(std::string source_image, std::string target_image, int N)
 {
-    N = 500;
-    double step = 10.;
+    N = 700;
+    double step = 1000.;
+    int interpolation_rate = 300;
+    int interoplation_steps = 10;
     Image source = Image();
     source.load_from_file(source_image);
     source.convert_to_grayscale();
@@ -213,19 +220,6 @@ void interpolation(std::string source_image, std::string target_image, int N)
 
     double target_total_mass = compute_total_mass(target);
 
-    std::vector< std::pair<double, double> > sites {
-        std::make_pair(1.,1.),
-        std::make_pair(4.,19.),
-        std::make_pair(50.,20.),
-        std::make_pair(100.,35.),
-        std::make_pair(16.,13.),
-    };
-
-    /*std::vector< double > weights { 1., 4., 2., 8., 1.};
-
-    PowerDiagram pd = PowerDiagram(sites, weights, 128., 128.);
-    pd.get_projection();*/
-
     std::vector< std::pair<double, double> >target_sample;
     std::vector< double > target_masses;
 
@@ -233,7 +227,7 @@ void interpolation(std::string source_image, std::string target_image, int N)
 
     std::vector< double > weights(N, 10.);
 
-    std::ofstream outputFile("mse_step10_N500_10Kiter.txt");
+    std::ofstream outputFile("mse.txt");
 
     for(int gradient_iter = 0; gradient_iter < 10000; gradient_iter++) {
         PowerDiagram pd = PowerDiagram(target_sample, weights, (double)target.width, (double)target.height);
@@ -244,22 +238,36 @@ void interpolation(std::string source_image, std::string target_image, int N)
         std::vector< double > site_weight;
         generate_mapping(source, *pd.container, pix_to_site, pix_to_coord, site_to_pix, site_weight, N);
 
-        if(DEBUG) {
-            std::cout << "masses stuff" << target_masses[0] << " " << site_weight[0] << std::endl;
-            std::cout << "masses stuff" << target_masses[20] << " " << site_weight[20] << std::endl;
-        }
-        
         std::vector< double > gradient(N,0);
         double mse = 0;
         for(int p = 0; p < N; p++) {
             gradient[p] = target_masses[p]/target_total_mass - site_weight[p]/source_total_mass;
             mse += (gradient[p]*gradient[p])/N;
-            weights[p] = std::max(1e-4, weights[p] + step * gradient[p]);
+            weights[p] = weights[p]+step*gradient[p];//std::max(1e-4, weights[p] + step * gradient[p]);
         }
         if(DEBUG) {
             std::cout << "grad : " << gradient[0] << " " << gradient[20] << std::endl;
             std::cout << "weight : " << weights[0] << " " << weights[20] << std::endl;
         }
+
+        if(gradient_iter % interpolation_rate == 0) {
+            char* name = new char[100];
+            for(int t = 1; t < interoplation_steps; t++) {
+                sprintf(name, "debug_imgs/grad_iter_%d_inter_%d.png", gradient_iter, t); 
+                std::cout << "Generating interpolation at step " << gradient_iter << ", at " << 100.*(double)t/(double)interoplation_steps << "%" << std::endl;
+
+                std::vector< double > weights_interp(N, 0.);
+                for(int s = 0; s < N; s++) {
+                    weights_interp[s] = ((double)t/(double)interoplation_steps)*weights[s];
+                }
+
+                PowerDiagram pd = PowerDiagram(target_sample, weights_interp, (double)target.width, (double)target.height);
+                generate_image_from_container(source, *pd.container, name, N);
+            }
+
+            delete[] name;
+        }
+        
         std::cout << gradient_iter << "; " << mse << std::endl;
         outputFile << gradient_iter << "; " << mse << std::endl;
 
